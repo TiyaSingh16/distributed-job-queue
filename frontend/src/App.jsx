@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import './App.css';
 
-const API_BASE = 'http://localhost:3000';
-
+const API_BASE = 'https://api-server-production-6280.up.railway.app';
 function App() {
   const [imageUrl, setImageUrl] = useState('https://picsum.photos/800/600');
   const [width, setWidth] = useState(300);
