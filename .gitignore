@@ -1,0 +1,7 @@
+node_modules/
+.env
+outputs/*.jpg
+outputs/*.jpeg
+outputs/*.png
+frontend/node_modules/
+frontend/dist/
