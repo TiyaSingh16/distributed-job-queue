@@ -94,7 +94,7 @@ function App() {
                 <img src={job.result.imageUrl} alt="resized" style={{ maxWidth: 150, borderRadius: 4 }} />
                 <div style={{ fontSize: 13, color: '#555' }}>
                   {job.result.sizeKB} KB —{' '}
-                  <a href={job.result.imageUrl} target="_blank" rel="noreferrer">
+                  <a href={job.result.imageUrl.replace('/upload/', '/upload/fl_attachment/')}>
                     Download
                   </a>
                 </div>
