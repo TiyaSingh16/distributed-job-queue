@@ -6,7 +6,10 @@ const sharp = require('sharp');
 const fs = require('fs');
 const path = require('path');
 const Job = require('./models');
-
+const outputsDir = path.join(__dirname, 'outputs');
+if (!fs.existsSync(outputsDir)) {
+  fs.mkdirSync(outputsDir, { recursive: true });
+}
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB connected (worker)'))
   .catch((err) => console.error('MongoDB connection error:', err));
