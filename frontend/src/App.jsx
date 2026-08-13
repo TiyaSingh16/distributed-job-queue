@@ -90,8 +90,14 @@ function App() {
           >
             <strong>Job {job.id}</strong> — {job.status}
             {job.result && (
-              <div style={{ fontSize: 13, color: '#555' }}>
-                Saved: {job.result.outputPath} ({job.result.sizeKB} KB)
+              <div style={{ marginTop: 8 }}>
+                <img src={job.result.imageUrl} alt="resized" style={{ maxWidth: 150, borderRadius: 4 }} />
+                <div style={{ fontSize: 13, color: '#555' }}>
+                  {job.result.sizeKB} KB —{' '}
+                  <a href={job.result.imageUrl} target="_blank" rel="noreferrer">
+                    Download
+                  </a>
+                </div>
               </div>
             )}
           </li>

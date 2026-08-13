@@ -3,13 +3,15 @@ const mongoose = require('mongoose');
 const { Worker } = require('bullmq');
 const axios = require('axios');
 const sharp = require('sharp');
-const fs = require('fs');
-const path = require('path');
+const cloudinary = require('cloudinary').v2;
 const Job = require('./models');
-const outputsDir = path.join(__dirname, 'outputs');
-if (!fs.existsSync(outputsDir)) {
-  fs.mkdirSync(outputsDir, { recursive: true });
-}
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB connected (worker)'))
   .catch((err) => console.error('MongoDB connection error:', err));
@@ -33,30 +35,33 @@ const worker = new Worker(
     const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
     const inputBuffer = Buffer.from(response.data);
 
-    // 2. Resize it with sharp
-    const outputFilename = `resized-${job.id}.jpg`;
-    const outputPath = path.join(__dirname, 'outputs', outputFilename);
-
-    await sharp(inputBuffer)
+    // 2. Resize it with sharp (still in-memory, no disk write)
+    const resizedBuffer = await sharp(inputBuffer)
       .resize(width || 300, height || 300)
       .jpeg({ quality: 80 })
-      .toFile(outputPath);
+      .toBuffer();
 
-    // 3. Check the resulting file size
-    const stats = fs.statSync(outputPath);
+    // 3. Upload the resized buffer to Cloudinary
+    const uploadResult = await new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        { folder: 'job-queue-resized', public_id: `resized-${job.id}` },
+        (error, result) => (error ? reject(error) : resolve(result))
+      );
+      stream.end(resizedBuffer);
+    });
 
     await Job.findOneAndUpdate(
       { bullJobId: job.id },
       {
         status: 'completed',
         result: {
-          outputPath: `outputs/${outputFilename}`,
-          sizeKB: Math.round(stats.size / 1024),
+          imageUrl: uploadResult.secure_url,
+          sizeKB: Math.round(uploadResult.bytes / 1024),
         },
       }
     );
 
-    console.log(`Job ${job.id} completed — saved to ${outputPath}`);
+    console.log(`Job ${job.id} completed — ${uploadResult.secure_url}`);
     return { status: 'done' };
   },
   { connection }
