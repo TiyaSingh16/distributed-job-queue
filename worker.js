@@ -66,7 +66,7 @@ const worker = new Worker(
     let resizedBuffer;
     try {
       resizedBuffer = await sharp(inputBuffer)
-        .resize(width || 300, height || 300)
+        .resize(width || 300, height || 300, { fit: 'inside', withoutEnlargement: true })
         .jpeg({ quality: 80 })
         .toBuffer();
     } catch (err) {
