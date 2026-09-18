@@ -31,17 +31,45 @@ const worker = new Worker(
 
     const { imageUrl, width, height } = job.data;
 
-    // 1. Download the source image
-    const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+    // 1. Download the source image, pretending to be a real browser
+    let response;
+    try {
+      response = await axios.get(imageUrl, {
+        responseType: 'arraybuffer',
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+        },
+        timeout: 10000,
+      });
+    } catch (err) {
+      throw new Error(
+        `Could not download the image (${err.response?.status || err.code || 'network error'}). Check that the URL is publicly accessible.`
+      );
+    }
+
+    // 2. Confirm we actually got an image back, not an HTML error/redirect page
+    const contentType = response.headers['content-type'] || '';
+    if (!contentType.startsWith('image/')) {
+      throw new Error(
+        'The URL did not return an image. Make sure it links directly to an image file, not a webpage (e.g. not a Google Images or Instagram link).'
+      );
+    }
+
     const inputBuffer = Buffer.from(response.data);
 
-    // 2. Resize it with sharp (still in-memory, no disk write)
-    const resizedBuffer = await sharp(inputBuffer)
-      .resize(width || 300, height || 300)
-      .jpeg({ quality: 80 })
-      .toBuffer();
+    // 3. Resize it with sharp (in-memory, no disk write)
+    let resizedBuffer;
+    try {
+      resizedBuffer = await sharp(inputBuffer)
+        .resize(width || 300, height || 300)
+        .jpeg({ quality: 80 })
+        .toBuffer();
+    } catch (err) {
+      throw new Error(`Could not process the image — it may be corrupted or an unsupported format (${err.message}).`);
+    }
 
-    // 3. Upload the resized buffer to Cloudinary
+    // 4. Upload the resized buffer to Cloudinary
     const uploadResult = await new Promise((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream(
         { folder: 'job-queue-resized', public_id: `resized-${job.id}` },

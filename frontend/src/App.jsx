@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react';
 import './App.css';
 
 const API_BASE = 'https://api-server-production-6280.up.railway.app';
+
 function App() {
-  const [imageUrl, setImageUrl] = useState('https://picsum.photos/800/600');
+  const [imageUrl, setImageUrl] = useState('');
   const [width, setWidth] = useState(300);
   const [height, setHeight] = useState(300);
   const [jobs, setJobs] = useState([]);
@@ -11,6 +12,7 @@ function App() {
 
   const submitJob = async (e) => {
     e.preventDefault();
+    if (!imageUrl.trim()) return;
     setSubmitting(true);
     try {
       const res = await fetch(`${API_BASE}/jobs`, {
@@ -39,7 +41,12 @@ function App() {
             const res = await fetch(`${API_BASE}/jobs/${job.id}`);
             if (!res.ok) return job;
             const data = await res.json();
-            return { id: job.id, status: data.status, result: data.result };
+            return {
+              id: job.id,
+              status: data.status,
+              result: data.result,
+              error: data.error,
+            };
           } catch {
             return job;
           }
@@ -55,22 +62,28 @@ function App() {
       <h1>Distributed Job Queue</h1>
 
       <form onSubmit={submitJob} style={{ marginBottom: 30 }}>
-        <div style={{ marginBottom: 10 }}>
+        <div style={{ marginBottom: 4 }}>
           <label>Image URL: </label>
           <input
             type="text"
             value={imageUrl}
             onChange={(e) => setImageUrl(e.target.value)}
+            placeholder="https://example.com/photo.jpg"
             style={{ width: '100%' }}
           />
         </div>
-        <div style={{ marginBottom: 10 }}>
-          <label>Width: </label>
-          <input type="number" value={width} onChange={(e) => setWidth(e.target.value)} />
-          <label style={{ marginLeft: 10 }}>Height: </label>
-          <input type="number" value={height} onChange={(e) => setHeight(e.target.value)} />
+        <div style={{ fontSize: 12, color: '#888', marginBottom: 10 }}>
+          Must be a direct link to an image file (ends in .jpg, .png, .webp).
+          Links to a webpage — Google Images results, Instagram or Pinterest
+          posts — won't work.
         </div>
-        <button type="submit" disabled={submitting}>
+        <div style={{ marginBottom: 10 }}>
+          <label>Width (px): </label>
+          <input type="number" value={width} onChange={(e) => setWidth(e.target.value)} min="10" max="2000" />
+          <label style={{ marginLeft: 10 }}>Height (px): </label>
+          <input type="number" value={height} onChange={(e) => setHeight(e.target.value)} min="10" max="2000" />
+        </div>
+        <button type="submit" disabled={submitting || !imageUrl.trim()}>
           {submitting ? 'Submitting...' : 'Submit Job'}
         </button>
       </form>
@@ -89,9 +102,20 @@ function App() {
             }}
           >
             <strong>Job {job.id}</strong> — {job.status}
+
+            {job.status === 'failed' && job.error && (
+              <div style={{ fontSize: 13, color: '#c0392b', marginTop: 4 }}>
+                {job.error}
+              </div>
+            )}
+
             {job.result && (
               <div style={{ marginTop: 8 }}>
-                <img src={job.result.imageUrl} alt="resized" style={{ maxWidth: 150, borderRadius: 4 }} />
+                <img
+                  src={job.result.imageUrl}
+                  alt="resized"
+                  style={{ maxWidth: 150, borderRadius: 4 }}
+                />
                 <div style={{ fontSize: 13, color: '#555' }}>
                   {job.result.sizeKB} KB —{' '}
                   <a href={job.result.imageUrl.replace('/upload/', '/upload/fl_attachment/')}>
