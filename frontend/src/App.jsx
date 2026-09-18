@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import './App.css';
 
-const API_BASE = 'https://api-server-production-6280.up.railway.app';
-
+const API_BASE = 'https://api-server-tyjz.onrender.com';
 function App() {
   const [imageUrl, setImageUrl] = useState('');
   const [width, setWidth] = useState(300);
