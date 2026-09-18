@@ -1,3 +1,4 @@
+const express = require('express');
 require('dotenv').config();
 const mongoose = require('mongoose');
 const { Worker } = require('bullmq');
@@ -5,7 +6,10 @@ const axios = require('axios');
 const sharp = require('sharp');
 const cloudinary = require('cloudinary').v2;
 const Job = require('./models');
-
+const app = express();
+app.get('/', (req, res) => res.send('Worker is running'));
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => console.log(`Dummy listener running on port ${PORT} (worker is alive)`));
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
