@@ -92,7 +92,45 @@ app.post('/jobs/upload', upload.single('image'), async (req, res) => {
   }
 });
 
-// Status check endpoint
+// List job history — supports pagination and filtering by status
+// e.g. GET /jobs?page=1&limit=20&status=completed
+app.get('/jobs', async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100); // cap at 100 per page
+    const filter = {};
+    if (req.query.status) {
+      const validStatuses = ['queued', 'processing', 'completed', 'failed'];
+      if (!validStatuses.includes(req.query.status)) {
+        return res.status(400).json({ message: `status must be one of: ${validStatuses.join(', ')}` });
+      }
+      filter.status = req.query.status;
+    }
+
+    const [jobs, total] = await Promise.all([
+      Job.find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit),
+      Job.countDocuments(filter),
+    ]);
+
+    res.json({
+      jobs,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
+  } catch (err) {
+    console.error('Error listing jobs:', err);
+    res.status(500).json({ message: 'Failed to list jobs' });
+  }
+});
+
+// Status check for a single job
 app.get('/jobs/:bullJobId', async (req, res) => {
   const job = await Job.findOne({ bullJobId: req.params.bullJobId });
   if (!job) return res.status(404).json({ message: 'Job not found' });
