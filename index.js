@@ -137,7 +137,13 @@ app.get('/jobs/:bullJobId', async (req, res) => {
   res.json(job);
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+// Only start listening when run directly (`node index.js`), so tests can
+// require this file without binding a port.
+if (require.main === module) {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
+
+module.exports = { app, enqueueJob };
