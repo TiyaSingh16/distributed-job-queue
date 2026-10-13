@@ -34,7 +34,15 @@ const connection = {
   tls: {},
 };
 
-const jobQueue = new Queue('jobs', { connection });
+// Every job (including ones the sweeper re-adds) gets up to 3 attempts,
+// retried after 2s, then 4s. The worker skips retries for permanent errors.
+const jobQueue = new Queue('jobs', {
+  connection,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 2000 },
+  },
+});
 
 // Shared helper: persist a Mongo record, then push the job onto the queue.
 // The record is written first so the worker's status updates always find it.

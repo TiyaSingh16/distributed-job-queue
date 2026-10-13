@@ -60,8 +60,9 @@ function createFakeJobModel() {
 // but before add() resolves (e.g. a worker failing it immediately).
 function createFakeBullmq(hooks) {
   class Queue {
-    constructor() {
+    constructor(name, opts) {
       this.jobs = new Map();
+      this.opts = opts;
       hooks.queue = this;
     }
     async add(name, data, opts = {}) {
@@ -130,6 +131,14 @@ describe('enqueueJob and sweeper', () => {
     // Invariant: the job record reflects the true final state.
     const record = Job.docs.find((d) => d.bullJobId === jobId);
     expect(record.status).toBe('failed');
+  });
+
+  it('configures 3 attempts with 2s exponential backoff for every job', () => {
+    // Set on the Queue, so jobs re-added by the sweeper get them too.
+    expect(hooks.queue.opts.defaultJobOptions).toEqual({
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 2000 },
+    });
   });
 
   it('keeps the record queued and still returns the job id when add() fails', async () => {
