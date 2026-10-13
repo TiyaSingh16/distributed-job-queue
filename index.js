@@ -6,6 +6,7 @@ const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
 const { Queue } = require('bullmq');
 const Job = require('./models');
+const { startSweeper } = require('./sweeper');
 
 const app = express();
 app.use(cors());
@@ -35,16 +36,26 @@ const connection = {
 
 const jobQueue = new Queue('jobs', { connection });
 
-// Shared helper: push a job onto the queue + persist a Mongo record
+// Shared helper: persist a Mongo record, then push the job onto the queue.
+// The record is written first so the worker's status updates always find it.
+// Its _id doubles as the BullMQ jobId, so re-adding the same job is a no-op.
 async function enqueueJob(type, payload) {
-  const bullJob = await jobQueue.add(type || 'default-job', payload || {});
+  const _id = new mongoose.Types.ObjectId();
+  const jobId = String(_id);
   const jobRecord = await Job.create({
-    bullJobId: bullJob.id,
+    _id,
+    bullJobId: jobId,
     type: type || 'default-job',
     payload: payload || {},
     status: 'queued',
   });
-  return { jobId: bullJob.id, mongoId: jobRecord._id };
+  try {
+    await jobQueue.add(jobRecord.type, jobRecord.payload, { jobId });
+  } catch (err) {
+    // The record stays 'queued'; the sweeper will re-add it.
+    console.error(`Failed to add job ${jobId} to queue:`, err);
+  }
+  return { jobId, mongoId: jobRecord._id };
 }
 
 // EXISTING: submit a job via image URL
@@ -52,7 +63,7 @@ app.post('/jobs', async (req, res) => {
   try {
     const { type, payload } = req.body;
     const result = await enqueueJob(type, payload);
-    res.status(201).json({ message: 'Job submitted', ...result });
+    res.status(202).json({ message: 'Job submitted', ...result });
   } catch (err) {
     console.error('Error submitting job:', err);
     res.status(500).json({ message: 'Failed to submit job' });
@@ -85,7 +96,7 @@ app.post('/jobs/upload', upload.single('image'), async (req, res) => {
       height: Number(height) || 300,
     });
 
-    res.status(201).json({ message: 'Job submitted', ...result });
+    res.status(202).json({ message: 'Job submitted', ...result });
   } catch (err) {
     console.error('Error uploading file:', err);
     res.status(500).json({ message: 'Failed to upload and submit job' });
@@ -144,6 +155,7 @@ if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
+  startSweeper(Job, jobQueue);
 }
 
 module.exports = { app, enqueueJob };

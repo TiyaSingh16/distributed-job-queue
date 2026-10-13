@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
@@ -7,22 +7,36 @@ import path from 'node:path';
 // with fakes before loading index.js, so its require() calls get them.
 const require = createRequire(import.meta.url);
 const root = path.resolve(__dirname, '..');
+const { sweepOnce, STALE_AFTER_MS } = require(path.join(root, 'sweeper.js'));
 
 function stubModule(id, exports) {
   const key = require.resolve(id);
   require.cache[key] = { id: key, filename: key, loaded: true, exports };
 }
 
+// Stand-in for mongoose: connect() is a no-op and ObjectId yields unique ids.
+function createFakeMongoose() {
+  let nextId = 1;
+  class ObjectId {
+    constructor() {
+      this.hex = (nextId++).toString(16).padStart(24, '0');
+    }
+    toString() {
+      return this.hex;
+    }
+  }
+  return { connect: () => Promise.resolve(), Types: { ObjectId } };
+}
+
 // In-memory stand-in for the Mongoose Job model. findOneAndUpdate mirrors
 // Mongoose's default (no upsert): if no document matches, it writes nothing
-// and resolves to null.
+// and resolves to null. find() supports only the sweeper's query.
 function createFakeJobModel() {
   const docs = [];
-  let nextId = 1;
   return {
     docs,
     async create(fields) {
-      const doc = { _id: `mongo-${nextId++}`, ...fields };
+      const doc = { createdAt: new Date(), ...fields };
       docs.push(doc);
       return doc;
     },
@@ -32,17 +46,30 @@ function createFakeJobModel() {
       Object.assign(doc, update);
       return doc;
     },
+    async find(filter) {
+      return docs.filter(
+        (d) => d.status === filter.status && d.createdAt < filter.createdAt.$lt
+      );
+    },
   };
 }
 
-// Fake BullMQ Queue. add() runs `beforeAddResolves` after the job "exists in
-// Redis" but before the promise returned to enqueueJob settles. This models a
-// worker picking the job up and failing it while the API is still awaiting.
+// Fake BullMQ Queue. Mirrors BullMQ's handling of a custom jobId: if a job
+// with that id already exists, add() returns it and creates nothing.
+// Hooks let a test fail add() or run code after the job "exists in Redis"
+// but before add() resolves (e.g. a worker failing it immediately).
 function createFakeBullmq(hooks) {
-  let nextId = 1;
   class Queue {
-    async add(name, data) {
-      const job = { id: String(nextId++), name, data };
+    constructor() {
+      this.jobs = new Map();
+      hooks.queue = this;
+    }
+    async add(name, data, opts = {}) {
+      if (hooks.addError) throw hooks.addError;
+      const existing = this.jobs.get(opts.jobId);
+      if (existing) return existing;
+      const job = { id: opts.jobId, name, data };
+      this.jobs.set(job.id, job);
       if (hooks.beforeAddResolves) await hooks.beforeAddResolves(job);
       return job;
     }
@@ -50,7 +77,7 @@ function createFakeBullmq(hooks) {
   return { Queue };
 }
 
-describe('enqueueJob', () => {
+describe('enqueueJob and sweeper', () => {
   let Job;
   let hooks;
   let enqueueJob;
@@ -59,7 +86,7 @@ describe('enqueueJob', () => {
     Job = createFakeJobModel();
     hooks = {};
     stubModule('bullmq', createFakeBullmq(hooks));
-    stubModule('mongoose', { connect: () => Promise.resolve() });
+    stubModule('mongoose', createFakeMongoose());
     stubModule(path.join(root, 'models.js'), Job);
 
     const indexPath = require.resolve(path.join(root, 'index.js'));
@@ -67,15 +94,22 @@ describe('enqueueJob', () => {
     ({ enqueueJob } = require(indexPath));
   });
 
-  it('records a job as failed when the worker fails it before Job.create runs', async () => {
+  // Ages a record past the sweeper's threshold.
+  function makeStale(jobId) {
+    const record = Job.docs.find((d) => d.bullJobId === jobId);
+    record.createdAt = new Date(Date.now() - STALE_AFTER_MS - 1000);
+  }
+
+  it('records a job as failed when the worker fails it before add() resolves', async () => {
     let failedUpdateResult;
 
     // Sequence of events:
-    //   1. API: jobQueue.add() puts job "1" in Redis.
-    //   2. Worker: picks up job "1", fails fast, and its 'failed' handler runs
-    //      the same update as worker.js:108. No Mongo record exists yet, so
-    //      it matches nothing.
-    //   3. API: add() resolves, then Job.create writes status 'queued'.
+    //   1. API: jobQueue.add() puts the job in Redis.
+    //   2. Worker: picks up the job, fails fast, and its 'failed' handler runs
+    //      the same update as worker.js:108.
+    //   3. API: add() resolves.
+    // Before the fix, Job.create ran after step 3, so step 2 matched nothing
+    // and the record was then written as 'queued' forever.
     hooks.beforeAddResolves = async (job) => {
       failedUpdateResult = await Job.findOneAndUpdate(
         { bullJobId: job.id },
@@ -85,13 +119,47 @@ describe('enqueueJob', () => {
 
     const { jobId } = await enqueueJob('resize-image', { imageUrl: 'http://bad.example/x.jpg' });
 
-    // The worker's update was lost: it ran before the record existed.
-    expect(failedUpdateResult).toBeNull();
+    // The worker's update found the record, because it was written first.
+    expect(failedUpdateResult).not.toBeNull();
 
-    // Invariant: the job record reflects the true final state. BullMQ
-    // considers this job failed, so the record must say 'failed'.
-    // On the current code it is stuck at 'queued' and nothing will change it.
+    // Invariant: the job record reflects the true final state.
     const record = Job.docs.find((d) => d.bullJobId === jobId);
     expect(record.status).toBe('failed');
+  });
+
+  it('keeps the record queued and still returns the job id when add() fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    hooks.addError = new Error('Redis unavailable');
+
+    const { jobId } = await enqueueJob('resize-image', { imageUrl: 'http://ok.example/x.jpg' });
+
+    expect(jobId).toBeTruthy();
+    const record = Job.docs.find((d) => d.bullJobId === jobId);
+    expect(record.status).toBe('queued');
+    expect(hooks.queue.jobs.size).toBe(0);
+  });
+
+  it('sweeper re-adds a stale queued job that is missing from the queue', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const payload = { imageUrl: 'http://ok.example/x.jpg', width: 300, height: 300 };
+    hooks.addError = new Error('Redis unavailable');
+    const { jobId } = await enqueueJob('resize-image', payload);
+    delete hooks.addError;
+    makeStale(jobId);
+
+    await sweepOnce(Job, hooks.queue);
+
+    const job = hooks.queue.jobs.get(jobId);
+    expect(job).toEqual({ id: jobId, name: 'resize-image', data: payload });
+  });
+
+  it('sweeper re-adding a job the queue already holds creates no duplicate', async () => {
+    const { jobId } = await enqueueJob('resize-image', { imageUrl: 'http://ok.example/x.jpg' });
+    makeStale(jobId); // e.g. a backlog: still waiting in Redis after 2 minutes
+
+    await sweepOnce(Job, hooks.queue);
+
+    expect([...hooks.queue.jobs.keys()]).toEqual([jobId]);
+    expect(Job.docs).toHaveLength(1);
   });
 });
