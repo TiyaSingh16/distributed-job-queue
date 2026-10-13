@@ -48,7 +48,7 @@ function createFakeJobModel() {
     },
     async find(filter) {
       return docs.filter(
-        (d) => d.status === filter.status && d.createdAt < filter.createdAt.$lt
+        (d) => filter.status.$in.includes(d.status) && d.createdAt < filter.createdAt.$lt
       );
     },
   };
@@ -72,6 +72,11 @@ function createFakeBullmq(hooks) {
       this.jobs.set(job.id, job);
       if (hooks.beforeAddResolves) await hooks.beforeAddResolves(job);
       return job;
+    }
+    // Jobs in this fake never progress past 'waiting'.
+    async getJob(id) {
+      const job = this.jobs.get(id);
+      return job && { ...job, getState: async () => 'waiting' };
     }
   }
   return { Queue };

@@ -82,19 +82,16 @@ const worker = new Worker(
       stream.end(resizedBuffer);
     });
 
-    await Job.findOneAndUpdate(
-      { bullJobId: job.id },
-      {
-        status: 'completed',
-        result: {
-          imageUrl: uploadResult.secure_url,
-          sizeKB: Math.round(uploadResult.bytes / 1024),
-        },
-      }
-    );
+    const result = {
+      imageUrl: uploadResult.secure_url,
+      sizeKB: Math.round(uploadResult.bytes / 1024),
+    };
+    await Job.findOneAndUpdate({ bullJobId: job.id }, { status: 'completed', result });
 
     console.log(`Job ${job.id} completed — ${uploadResult.secure_url}`);
-    return { status: 'done' };
+    // Returned so BullMQ stores it; the sweeper copies it into Mongo if the
+    // write above is ever lost.
+    return result;
   },
   { connection }
 );
