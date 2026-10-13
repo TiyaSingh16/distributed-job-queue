@@ -7,6 +7,7 @@ const cloudinary = require('cloudinary').v2;
 const { Queue } = require('bullmq');
 const Job = require('./models');
 const { startSweeper } = require('./sweeper');
+const { createJobBody, uploadFields, formatIssues } = require('./validation');
 
 const app = express();
 app.use(cors());
@@ -68,8 +69,13 @@ async function enqueueJob(type, payload) {
 
 // EXISTING: submit a job via image URL
 app.post('/jobs', async (req, res) => {
+  // Validate before anything is written, so a bad request leaves no record.
+  const parsed = createJobBody.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ message: 'Invalid job', errors: formatIssues(parsed.error) });
+  }
   try {
-    const { type, payload } = req.body;
+    const { type, payload } = parsed.data;
     const result = await enqueueJob(type, payload);
     res.status(202).json({ message: 'Job submitted', ...result });
   } catch (err) {
@@ -85,7 +91,12 @@ app.post('/jobs/upload', upload.single('image'), async (req, res) => {
       return res.status(400).json({ message: 'No file uploaded' });
     }
 
-    const { width, height } = req.body;
+    // Validate the form fields before spending a Cloudinary upload on them.
+    const parsed = uploadFields.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ message: 'Invalid job', errors: formatIssues(parsed.error) });
+    }
+    const { width, height } = parsed.data;
 
     // Upload the raw file to Cloudinary first to get a public URL —
     // the queue/worker then downloads THIS url and does the actual resize,
@@ -100,8 +111,8 @@ app.post('/jobs/upload', upload.single('image'), async (req, res) => {
 
     const result = await enqueueJob('resize-image', {
       imageUrl: uploadResult.secure_url,
-      width: Number(width) || 300,
-      height: Number(height) || 300,
+      width,
+      height,
     });
 
     res.status(202).json({ message: 'Job submitted', ...result });

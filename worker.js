@@ -2,10 +2,11 @@ const express = require('express');
 require('dotenv').config();
 const mongoose = require('mongoose');
 const { Worker, UnrecoverableError } = require('bullmq');
-const axios = require('axios');
 const sharp = require('sharp');
 const cloudinary = require('cloudinary').v2;
 const Job = require('./models');
+const { resizePayload } = require('./validation');
+const { fetchImage, isRejectedUrl } = require('./safe-fetch');
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -20,6 +21,11 @@ const connection = {
   tls: {},
 };
 
+// sharp refuses to decode images with more pixels than this. A small,
+// highly compressed file can decode to gigabytes (a "decompression bomb");
+// 40 megapixels is about 160MB of raw RGBA. sharp's default is ~268MP.
+const MAX_INPUT_PIXELS = 40_000_000;
+
 // HTTP statuses that mean "try again later"; every other 4xx is permanent.
 const RETRYABLE_4XX = [408, 429];
 
@@ -31,25 +37,26 @@ function isPermanentHttpError(status) {
 // job immediately. Any other error is retried per the queue's job options.
 async function processJob(job) {
   console.log(`Processing job ${job.id}:`, job.data);
-  const { imageUrl, width, height } = job.data;
-  if (typeof imageUrl !== 'string' || !imageUrl) {
-    throw new UnrecoverableError('Job is missing an imageUrl.');
+  // Same rules as the API. Also catches records created before validation.
+  const parsed = resizePayload.safeParse(job.data);
+  if (!parsed.success) {
+    throw new UnrecoverableError(`Invalid job data: ${parsed.error.issues.map((i) => i.message).join('; ')}`);
   }
+  const { imageUrl, width, height } = parsed.data;
 
   await Job.findOneAndUpdate({ bullJobId: job.id }, { status: 'processing' });
 
-  // 1. Download the source image, pretending to be a real browser
+  // 1. Download the source image (SSRF-guarded, max 15MB; see safe-fetch.js)
   let response;
   try {
-    response = await axios.get(imageUrl, {
-      responseType: 'arraybuffer',
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
-      },
-      timeout: 10000,
-    });
+    response = await fetchImage(imageUrl);
   } catch (err) {
+    if (isRejectedUrl(err)) {
+      throw new UnrecoverableError(`Refusing to download the image: ${err.cause?.message || err.message}`);
+    }
+    if (/maxContentLength/.test(err.message)) {
+      throw new UnrecoverableError('The image is larger than the 15MB download limit.');
+    }
     const status = err.response?.status;
     const message = `Could not download the image (${status || err.code || 'network error'}). Check that the URL is publicly accessible.`;
     throw isPermanentHttpError(status) ? new UnrecoverableError(message) : new Error(message);
@@ -68,8 +75,8 @@ async function processJob(job) {
   // 3. Resize it with sharp (in-memory, no disk write)
   let resizedBuffer;
   try {
-    resizedBuffer = await sharp(inputBuffer)
-      .resize(width || 300, height || 300, { fit: 'inside', withoutEnlargement: true })
+    resizedBuffer = await sharp(inputBuffer, { limitInputPixels: MAX_INPUT_PIXELS })
+      .resize(width, height, { fit: 'inside', withoutEnlargement: true })
       .jpeg({ quality: 80 })
       .toBuffer();
   } catch (err) {
@@ -140,4 +147,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { processJob, handleFailed, isFinalAttempt };
+module.exports = { processJob, handleFailed, isFinalAttempt, MAX_INPUT_PIXELS };

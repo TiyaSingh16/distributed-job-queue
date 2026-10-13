@@ -17,12 +17,14 @@ function stubModule(id, exports) {
 const fakes = {
   axiosGet: vi.fn(),
   sharpToBuffer: vi.fn(),
+  sharpOptions: undefined, // options passed to sharp(input, options)
   uploadResult: null, // { error, result } for cloudinary.upload_stream
   updates: [], // calls to Job.findOneAndUpdate
 };
 
-// sharp(buf).resize(...).jpeg(...).toBuffer()
-function fakeSharp() {
+// sharp(buf, opts).resize(...).jpeg(...).toBuffer()
+function fakeSharp(input, opts) {
+  fakes.sharpOptions = opts;
   const chain = { resize: () => chain, jpeg: () => chain, toBuffer: () => fakes.sharpToBuffer() };
   return chain;
 }
@@ -76,7 +78,7 @@ function bullJob(data = {}, extra = {}) {
 }
 
 function imageResponse(contentType = 'image/jpeg') {
-  return { headers: { 'content-type': contentType }, data: Buffer.from('fake') };
+  return { status: 200, headers: { 'content-type': contentType }, data: Buffer.from('fake') };
 }
 
 function httpError(status) {
@@ -166,5 +168,51 @@ describe('processJob: permanent errors are unrecoverable, transient ones are ret
     const rejection = worker.processJob(bullJob());
     await expect(rejection).rejects.toThrow('Cloudinary 500');
     await expect(rejection).rejects.not.toBeInstanceOf(UnrecoverableError);
+  });
+});
+
+describe('processJob: input safety', () => {
+  it.each([
+    ['width 0', { width: 0 }],
+    ['width 4001', { width: 4001 }],
+    ['a file: URL', { imageUrl: 'file:///etc/passwd' }],
+  ])('rejects job data with %s as unrecoverable', async (_label, data) => {
+    await expect(worker.processJob(bullJob(data))).rejects.toBeInstanceOf(UnrecoverableError);
+    expect(fakes.axiosGet).not.toHaveBeenCalled();
+  });
+
+  it('refuses an internal address without downloading it', async () => {
+    const rejection = worker.processJob(bullJob({ imageUrl: 'http://169.254.169.254/latest/meta-data/' }));
+    await expect(rejection).rejects.toBeInstanceOf(UnrecoverableError);
+    await expect(rejection).rejects.toThrow(/Refusing to download/);
+    expect(fakes.axiosGet).not.toHaveBeenCalled();
+  });
+
+  it('downloads through the guarded fetch (size cap, manual redirects)', async () => {
+    fakes.axiosGet.mockResolvedValue(imageResponse());
+    fakes.sharpToBuffer.mockResolvedValue(Buffer.from('small'));
+
+    await worker.processJob(bullJob());
+
+    expect(fakes.axiosGet.mock.calls[0][1]).toMatchObject({ maxContentLength: 15 * 1024 * 1024, maxRedirects: 0 });
+  });
+
+  it('treats an image over the size cap as unrecoverable', async () => {
+    fakes.axiosGet.mockRejectedValue(
+      Object.assign(new Error('maxContentLength size of 15728640 exceeded'), { code: 'ERR_BAD_RESPONSE' })
+    );
+    const rejection = worker.processJob(bullJob());
+    await expect(rejection).rejects.toBeInstanceOf(UnrecoverableError);
+    await expect(rejection).rejects.toThrow(/15MB/);
+  });
+
+  it('decodes with a pixel limit (decompression-bomb guard)', async () => {
+    fakes.axiosGet.mockResolvedValue(imageResponse());
+    fakes.sharpToBuffer.mockResolvedValue(Buffer.from('small'));
+
+    await worker.processJob(bullJob());
+
+    expect(fakes.sharpOptions).toEqual({ limitInputPixels: worker.MAX_INPUT_PIXELS });
+    expect(worker.MAX_INPUT_PIXELS).toBeLessThan(268402689); // tighter than sharp's default
   });
 });
