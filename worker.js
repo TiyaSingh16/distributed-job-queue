@@ -7,19 +7,13 @@ const cloudinary = require('cloudinary').v2;
 const Job = require('./models');
 const { resizePayload } = require('./validation');
 const { fetchImage, isRejectedUrl } = require('./safe-fetch');
+const { redisConnection, workerConcurrency } = require('./config');
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
-
-const connection = {
-  host: 'ideal-hyena-181940.upstash.io',
-  port: 6379,
-  password: process.env.REDIS_PASSWORD,
-  tls: {},
-};
 
 // sharp refuses to decode images with more pixels than this. A small,
 // highly compressed file can decode to gigabytes (a "decompression bomb");
@@ -123,6 +117,29 @@ async function handleFailed(job, err) {
   await Job.findOneAndUpdate({ bullJobId: job.id }, { status: 'failed', error: err.message });
 }
 
+// On SIGTERM (sent by the host on deploy/scale-down) or SIGINT (Ctrl+C), stop
+// taking new jobs and let active ones finish before exiting. worker.close()
+// resolves once active jobs are done. A job cut off anyway (the host
+// SIGKILLs after its grace period) is detected as stalled by BullMQ and
+// re-run, which is safe because processing is idempotent.
+function registerShutdown(worker, { proc = process, exit = process.exit } = {}) {
+  let closing = false;
+  async function shutdown(signal) {
+    if (closing) return;
+    closing = true;
+    console.log(`${signal} received, waiting for active jobs to finish...`);
+    try {
+      await worker.close();
+      exit(0);
+    } catch (err) {
+      console.error('Error while closing worker:', err);
+      exit(1);
+    }
+  }
+  proc.on('SIGTERM', () => shutdown('SIGTERM'));
+  proc.on('SIGINT', () => shutdown('SIGINT'));
+}
+
 // Only connect and start consuming when run directly (`node worker.js`), so
 // tests can require this file without touching Redis, Mongo or a port.
 if (require.main === module) {
@@ -135,7 +152,11 @@ if (require.main === module) {
     .then(() => console.log('MongoDB connected (worker)'))
     .catch((err) => console.error('MongoDB connection error:', err));
 
-  const worker = new Worker('jobs', processJob, { connection });
+  const worker = new Worker('jobs', processJob, {
+    connection: redisConnection(),
+    concurrency: workerConcurrency(),
+  });
+  registerShutdown(worker);
 
   worker.on('completed', (job) => {
     console.log(`✅ Job ${job.id} has completed`);
@@ -147,4 +168,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { processJob, handleFailed, isFinalAttempt, MAX_INPUT_PIXELS };
+module.exports = { processJob, handleFailed, isFinalAttempt, registerShutdown, MAX_INPUT_PIXELS };

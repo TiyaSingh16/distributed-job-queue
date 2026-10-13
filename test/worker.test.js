@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
@@ -214,5 +215,63 @@ describe('processJob: input safety', () => {
 
     expect(fakes.sharpOptions).toEqual({ limitInputPixels: worker.MAX_INPUT_PIXELS });
     expect(worker.MAX_INPUT_PIXELS).toBeLessThan(268402689); // tighter than sharp's default
+  });
+});
+
+describe('registerShutdown', () => {
+  function setup({ closeError } = {}) {
+    const proc = new EventEmitter();
+    const order = [];
+    let finishClose;
+    const fakeWorker = {
+      close: vi.fn(
+        () =>
+          new Promise((resolve, reject) => {
+            order.push('close-started');
+            finishClose = () => {
+              order.push('close-finished');
+              closeError ? reject(closeError) : resolve();
+            };
+          })
+      ),
+    };
+    const exit = vi.fn((code) => order.push(`exit(${code})`));
+    worker.registerShutdown(fakeWorker, { proc, exit });
+    return { proc, fakeWorker, exit, order, finish: () => finishClose() };
+  }
+
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+  it.each(['SIGTERM', 'SIGINT'])('on %s, waits for worker.close() before exiting 0', async (signal) => {
+    const { proc, exit, order, finish } = setup();
+
+    proc.emit(signal);
+    await flush();
+    expect(exit).not.toHaveBeenCalled(); // active jobs are still finishing
+
+    finish();
+    await flush();
+    expect(order).toEqual(['close-started', 'close-finished', 'exit(0)']);
+  });
+
+  it('closes only once when signals repeat', async () => {
+    const { proc, fakeWorker, finish } = setup();
+
+    proc.emit('SIGTERM');
+    proc.emit('SIGINT');
+    finish();
+    await flush();
+
+    expect(fakeWorker.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('exits 1 if close fails', async () => {
+    const { proc, exit, finish } = setup({ closeError: new Error('redis gone') });
+
+    proc.emit('SIGTERM');
+    finish();
+    await flush();
+
+    expect(exit).toHaveBeenCalledWith(1);
   });
 });

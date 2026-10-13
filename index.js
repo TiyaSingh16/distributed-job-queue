@@ -8,6 +8,7 @@ const { Queue } = require('bullmq');
 const Job = require('./models');
 const { startSweeper } = require('./sweeper');
 const { createJobBody, uploadFields, formatIssues } = require('./validation');
+const { redisConnection } = require('./config');
 
 const app = express();
 app.use(cors());
@@ -28,17 +29,10 @@ mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB connected'))
   .catch((err) => console.error('MongoDB connection error:', err));
 
-const connection = {
-  host: 'ideal-hyena-181940.upstash.io',
-  port: 6379,
-  password: process.env.REDIS_PASSWORD,
-  tls: {},
-};
-
 // Every job (including ones the sweeper re-adds) gets up to 3 attempts,
 // retried after 2s, then 4s. The worker skips retries for permanent errors.
 const jobQueue = new Queue('jobs', {
-  connection,
+  connection: redisConnection(),
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: 'exponential', delay: 2000 },

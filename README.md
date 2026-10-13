@@ -153,13 +153,16 @@ npm install
 npm run dev
 ```
 
-**Environment variables** (`.env` in the project root):
+**Environment variables** (`.env` in the project root; copy `.env.example`):
 ```
 MONGO_URI=<your MongoDB Atlas connection string>
+REDIS_HOST=<your Upstash Redis host>
+REDIS_PORT=6379
 REDIS_PASSWORD=<your Upstash Redis password>
 CLOUDINARY_CLOUD_NAME=<your Cloudinary cloud name>
 CLOUDINARY_API_KEY=<your Cloudinary API key>
 CLOUDINARY_API_SECRET=<your Cloudinary API secret>
+WORKER_CONCURRENCY=2   # optional, jobs per worker process
 ```
 
 ---
