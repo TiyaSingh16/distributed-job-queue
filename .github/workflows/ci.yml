@@ -24,6 +24,31 @@ jobs:
       # Runs the backend suite and the frontend's helper tests (see vitest.config.mjs).
       - run: npm test
 
+  integration:
+    name: Integration tests (real Redis + BullMQ)
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run test:integration
+        env:
+          INTEGRATION_REDIS_HOST: 127.0.0.1
+          INTEGRATION_REDIS_PORT: 6379
+
   frontend:
     name: Frontend lint and build
     runs-on: ubuntu-latest

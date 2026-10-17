@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "vitest run",
-    "bench": "node bench/run.js --workers 1,2,4 --jobs 200 --runs 3"
+    "bench": "node bench/run.js --workers 1,2,4 --jobs 200 --runs 3",
+    "test:integration": "vitest run test/integration"
   },
   "keywords": [],
   "author": "",
