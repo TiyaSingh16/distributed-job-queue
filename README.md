@@ -7,7 +7,7 @@ The focus is **correctness under failure**:
 - transient errors are retried and permanent ones fail fast;
 - workers refuse to fetch internal network addresses.
 
-**Live demo:** https://distributed-job-queue-rho.vercel.app. The API runs on Render's free tier, so the first request after an idle period can take up to a minute while it wakes up.
+**Live demo:** https://distributed-job-queue-sandy.vercel.app. The API and the worker run on Render's free tier, which puts them to sleep after about 15 minutes without web traffic. The first request can take up to a minute while the API wakes up, and jobs stay `queued` until the worker wakes (opening the worker's URL wakes it).
 
 ---
 
@@ -193,5 +193,6 @@ npm run bench               # requires redis-server on PATH; starts and FLUSHES 
 - **Polling, not push.** The UI polls every 2 s. Server-Sent Events or WebSockets would cut requests.
 - **The sweeper loads all stale records at once.** That's fine at this scale; it would need batching for a large backlog.
 - **The load test is local and partly stubbed** (see bench/RESULTS.md). There are no production performance figures.
+- **The worker sleeps on Render's free tier.** It is deployed as a web service (with a small health listener), and free web services sleep when they get no HTTP traffic. A sleeping worker does not consume the queue, so jobs wait in `queued` until it wakes. Nothing is lost: they are processed when it wakes. A paid background-worker instance, or a keep-alive ping, would fix it.
 - **The API process has no graceful shutdown** (the worker does). Backoff has no jitter.
 - **Records created before ids were ObjectIds may share an id**, which would block the unique index. Use `scripts/check-job-ids.js` to check.
