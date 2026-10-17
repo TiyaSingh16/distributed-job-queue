@@ -35,7 +35,9 @@ function createFakeJobModel() {
   const docs = [];
   return {
     docs,
+    createErrors: [],
     async create(fields) {
+      if (this.createErrors.length) throw this.createErrors.shift();
       const doc = { createdAt: new Date(), ...fields };
       docs.push(doc);
       return doc;
@@ -175,5 +177,34 @@ describe('enqueueJob and sweeper', () => {
 
     expect([...hooks.queue.jobs.keys()]).toEqual([jobId]);
     expect(Job.docs).toHaveLength(1);
+  });
+
+  it('retries once with a fresh id when the insert hits a duplicate key', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    Job.createErrors.push(Object.assign(new Error('E11000 duplicate key error'), { code: 11000 }));
+
+    const { jobId } = await enqueueJob('resize-image', { imageUrl: 'https://example.com/a.jpg' });
+
+    expect(Job.docs).toHaveLength(1);
+    expect(Job.docs[0].bullJobId).toBe(jobId);
+    expect(hooks.queue.jobs.has(jobId)).toBe(true);
+  });
+
+  it('gives up after a second duplicate key and enqueues nothing', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const dup = () => Object.assign(new Error('E11000 duplicate key error'), { code: 11000 });
+    Job.createErrors.push(dup(), dup());
+
+    await expect(enqueueJob('resize-image', { imageUrl: 'https://example.com/a.jpg' })).rejects.toThrow(/E11000/);
+    expect(Job.docs).toHaveLength(0);
+    expect(hooks.queue.jobs.size).toBe(0);
+  });
+
+  it('does not retry other database errors', async () => {
+    Job.createErrors.push(new Error('MongoNetworkError'));
+    await expect(enqueueJob('resize-image', { imageUrl: 'https://example.com/a.jpg' })).rejects.toThrow(
+      'MongoNetworkError'
+    );
+    expect(Job.docs).toHaveLength(0);
   });
 });

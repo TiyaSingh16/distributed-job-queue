@@ -39,19 +39,47 @@ const jobQueue = new Queue('jobs', {
   },
 });
 
+// Duplicate job ids are prevented by the database, not by application code:
+// models.js declares a unique index on bullJobId, so if two inserts ever
+// carried the same id, MongoDB would accept one and reject the other with
+// error code 11000 (duplicate key), atomically, even under concurrency. A
+// "check whether the id exists, then insert" in application code could not
+// guarantee that, because two requests can both pass the check.
+//
+// The id is a fresh ObjectId generated here, never taken from the client, so a
+// collision is practically impossible (timestamp + per-process random value +
+// counter). If one happens anyway, retry once with a new id rather than fail
+// the user's request; a second collision indicates a real bug, so surface it.
+const DUPLICATE_KEY = 11000;
+const MAX_ID_ATTEMPTS = 2;
+
+async function createJobRecord(type, payload) {
+  for (let attempt = 1; ; attempt++) {
+    const _id = new mongoose.Types.ObjectId();
+    try {
+      return await Job.create({
+        _id,
+        bullJobId: String(_id),
+        type: type || 'default-job',
+        payload: payload || {},
+        status: 'queued',
+      });
+    } catch (err) {
+      if (err?.code === DUPLICATE_KEY && attempt < MAX_ID_ATTEMPTS) {
+        console.warn(`Duplicate job id ${_id} on insert; retrying with a new id`);
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 // Shared helper: persist a Mongo record, then push the job onto the queue.
 // The record is written first so the worker's status updates always find it.
 // Its _id doubles as the BullMQ jobId, so re-adding the same job is a no-op.
 async function enqueueJob(type, payload) {
-  const _id = new mongoose.Types.ObjectId();
-  const jobId = String(_id);
-  const jobRecord = await Job.create({
-    _id,
-    bullJobId: jobId,
-    type: type || 'default-job',
-    payload: payload || {},
-    status: 'queued',
-  });
+  const jobRecord = await createJobRecord(type, payload);
+  const jobId = jobRecord.bullJobId;
   try {
     await jobQueue.add(jobRecord.type, jobRecord.payload, { jobId });
   } catch (err) {
@@ -205,6 +233,21 @@ if (require.main === module) {
     console.log(`Server running on http://localhost:${PORT}`);
   });
   startSweeper(Job, jobQueue);
+
+  // Mongoose builds the indexes declared in models.js in the background and
+  // does NOT crash if that fails. Building the unique bullJobId index fails
+  // if existing records already share an id (possible for records created
+  // before ids were ObjectIds), and the app would then run without the
+  // guarantee while looking healthy. Make that failure loud.
+  Job.init().then(
+    () => console.log('Job indexes are in place'),
+    (err) =>
+      console.error(
+        'Could not build Job indexes. If this is a duplicate key error, run ' +
+          '`node scripts/check-job-ids.js` to list the duplicate bullJobIds:',
+        err
+      )
+  );
 }
 
 module.exports = { app, enqueueJob };
