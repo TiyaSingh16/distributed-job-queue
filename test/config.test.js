@@ -12,6 +12,12 @@ describe('redisConnection', () => {
     expect(redisConnection(env)).toEqual({ host: 'example.upstash.io', port: 6380, password: 'pw', tls: {} });
   });
 
+  it('can disable TLS for a local Redis, and rejects anything but true/false', () => {
+    expect(redisConnection({ REDIS_HOST: 'localhost', REDIS_TLS: 'false' })).not.toHaveProperty('tls');
+    expect(redisConnection({ REDIS_HOST: 'h', REDIS_TLS: 'true' }).tls).toEqual({});
+    expect(() => redisConnection({ REDIS_HOST: 'h', REDIS_TLS: 'no' })).toThrow(/REDIS_TLS/);
+  });
+
   it('defaults the port to 6379', () => {
     expect(redisConnection({ REDIS_HOST: 'h' }).port).toBe(6379);
   });

@@ -1,0 +1,294 @@
+{
+  "date": "2026-10-17T13:17:49.651Z",
+  "env": {
+    "cpus": 2,
+    "cpuModel": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "totalMemGb": 7.8,
+    "node": "v22.22.0",
+    "redis": "v=7.0.15",
+    "bullmq": "6.1.0",
+    "sharp": "0.35.5",
+    "libvips": "8.18.7",
+    "platform": "linux 6.18.44-fc-v139"
+  },
+  "config": {
+    "workerCounts": [
+      1,
+      2,
+      4
+    ],
+    "jobsPerRun": 200,
+    "runs": 3,
+    "ioMsEachWay": 0,
+    "concurrencyPerWorker": 1,
+    "warmupJobs": 10,
+    "fixture": {
+      "width": 2400,
+      "height": 1600,
+      "bytes": 1147549
+    },
+    "resizeTo": "300x300"
+  },
+  "summary": [
+    {
+      "workers": 1,
+      "throughputJobsPerS": 43.71584699453552,
+      "throughputRange": [
+        43.24324324324324,
+        43.89815627743635
+      ],
+      "p50Ms": 2296,
+      "p95Ms": 4348,
+      "p99Ms": 4523,
+      "processingP50Ms": 22,
+      "errorRatePct": 0,
+      "avgCoresBusy": 0.9591747146619842,
+      "peakRssMbPerWorker": 163.20703125,
+      "startupMs": 426,
+      "speedupVsFirst": 1
+    },
+    {
+      "workers": 2,
+      "throughputJobsPerS": 81.36696501220504,
+      "throughputRange": [
+        77.85130400934216,
+        83.71703641691084
+      ],
+      "p50Ms": 1239,
+      "p95Ms": 2334,
+      "p99Ms": 2415,
+      "processingP50Ms": 23,
+      "errorRatePct": 0,
+      "avgCoresBusy": 1.7209113100081364,
+      "peakRssMbPerWorker": 164.07421875,
+      "startupMs": 493,
+      "speedupVsFirst": 1.8612693246541905
+    },
+    {
+      "workers": 4,
+      "throughputJobsPerS": 82.57638315441783,
+      "throughputRange": [
+        79.84031936127745,
+        87.98944126704795
+      ],
+      "p50Ms": 1153,
+      "p95Ms": 2317,
+      "p99Ms": 2401,
+      "processingP50Ms": 47,
+      "errorRatePct": 0,
+      "avgCoresBusy": 1.8785745710514739,
+      "peakRssMbPerWorker": 158.84765625,
+      "startupMs": 955,
+      "speedupVsFirst": 1.8889347646573078
+    }
+  ],
+  "runs": [
+    {
+      "workers": 1,
+      "run": 1,
+      "jobs": 200,
+      "completed": 200,
+      "failed": 0,
+      "errorRatePct": 0,
+      "elapsedS": 4.556,
+      "throughputJobsPerS": 43.89815627743635,
+      "latencyMs": {
+        "p50": 2262,
+        "p95": 4301,
+        "p99": 4508
+      },
+      "processingMs": {
+        "p50": 22,
+        "p95": 28
+      },
+      "workerCpuSeconds": 4.37,
+      "avgCoresBusy": 0.9591747146619842,
+      "peakRssMbPerWorker": 161.671875,
+      "startupMs": 455
+    },
+    {
+      "workers": 1,
+      "run": 2,
+      "jobs": 200,
+      "completed": 200,
+      "failed": 0,
+      "errorRatePct": 0,
+      "elapsedS": 4.575,
+      "throughputJobsPerS": 43.71584699453552,
+      "latencyMs": {
+        "p50": 2302,
+        "p95": 4348,
+        "p99": 4523
+      },
+      "processingMs": {
+        "p50": 22,
+        "p95": 28
+      },
+      "workerCpuSeconds": 4.319999999999999,
+      "avgCoresBusy": 0.944262295081967,
+      "peakRssMbPerWorker": 163.20703125,
+      "startupMs": 410
+    },
+    {
+      "workers": 1,
+      "run": 3,
+      "jobs": 200,
+      "completed": 200,
+      "failed": 0,
+      "errorRatePct": 0,
+      "elapsedS": 4.625,
+      "throughputJobsPerS": 43.24324324324324,
+      "latencyMs": {
+        "p50": 2296,
+        "p95": 4363,
+        "p99": 4543
+      },
+      "processingMs": {
+        "p50": 22,
+        "p95": 29
+      },
+      "workerCpuSeconds": 4.45,
+      "avgCoresBusy": 0.9621621621621622,
+      "peakRssMbPerWorker": 162.67578125,
+      "startupMs": 426
+    },
+    {
+      "workers": 2,
+      "run": 1,
+      "jobs": 200,
+      "completed": 200,
+      "failed": 0,
+      "errorRatePct": 0,
+      "elapsedS": 2.458,
+      "throughputJobsPerS": 81.36696501220504,
+      "latencyMs": {
+        "p50": 1163,
+        "p95": 2334,
+        "p99": 2415
+      },
+      "processingMs": {
+        "p50": 23,
+        "p95": 35
+      },
+      "workerCpuSeconds": 4.2299999999999995,
+      "avgCoresBusy": 1.7209113100081364,
+      "peakRssMbPerWorker": 164.07421875,
+      "startupMs": 459
+    },
+    {
+      "workers": 2,
+      "run": 2,
+      "jobs": 200,
+      "completed": 200,
+      "failed": 0,
+      "errorRatePct": 0,
+      "elapsedS": 2.389,
+      "throughputJobsPerS": 83.71703641691084,
+      "latencyMs": {
+        "p50": 1239,
+        "p95": 2258,
+        "p99": 2352
+      },
+      "processingMs": {
+        "p50": 22,
+        "p95": 30
+      },
+      "workerCpuSeconds": 4.3100000000000005,
+      "avgCoresBusy": 1.804102134784429,
+      "peakRssMbPerWorker": 162.4609375,
+      "startupMs": 559
+    },
+    {
+      "workers": 2,
+      "run": 3,
+      "jobs": 200,
+      "completed": 200,
+      "failed": 0,
+      "errorRatePct": 0,
+      "elapsedS": 2.569,
+      "throughputJobsPerS": 77.85130400934216,
+      "latencyMs": {
+        "p50": 1278,
+        "p95": 2437,
+        "p99": 2532
+      },
+      "processingMs": {
+        "p50": 25,
+        "p95": 33
+      },
+      "workerCpuSeconds": 4.359999999999999,
+      "avgCoresBusy": 1.6971584274036589,
+      "peakRssMbPerWorker": 162.79296875,
+      "startupMs": 493
+    },
+    {
+      "workers": 4,
+      "run": 1,
+      "jobs": 200,
+      "completed": 200,
+      "failed": 0,
+      "errorRatePct": 0,
+      "elapsedS": 2.422,
+      "throughputJobsPerS": 82.57638315441783,
+      "latencyMs": {
+        "p50": 1198,
+        "p95": 2317,
+        "p99": 2401
+      },
+      "processingMs": {
+        "p50": 47,
+        "p95": 68
+      },
+      "workerCpuSeconds": 4.6,
+      "avgCoresBusy": 1.89925681255161,
+      "peakRssMbPerWorker": 158.6953125,
+      "startupMs": 978
+    },
+    {
+      "workers": 4,
+      "run": 2,
+      "jobs": 200,
+      "completed": 200,
+      "failed": 0,
+      "errorRatePct": 0,
+      "elapsedS": 2.273,
+      "throughputJobsPerS": 87.98944126704795,
+      "latencyMs": {
+        "p50": 1088,
+        "p95": 2169,
+        "p99": 2244
+      },
+      "processingMs": {
+        "p50": 44,
+        "p95": 66
+      },
+      "workerCpuSeconds": 4.2700000000000005,
+      "avgCoresBusy": 1.8785745710514739,
+      "peakRssMbPerWorker": 158.84765625,
+      "startupMs": 955
+    },
+    {
+      "workers": 4,
+      "run": 3,
+      "jobs": 200,
+      "completed": 200,
+      "failed": 0,
+      "errorRatePct": 0,
+      "elapsedS": 2.505,
+      "throughputJobsPerS": 79.84031936127745,
+      "latencyMs": {
+        "p50": 1153,
+        "p95": 2408,
+        "p99": 2485
+      },
+      "processingMs": {
+        "p50": 47,
+        "p95": 85
+      },
+      "workerCpuSeconds": 4.550000000000001,
+      "avgCoresBusy": 1.8163672654690621,
+      "peakRssMbPerWorker": 158.8203125,
+      "startupMs": 949
+    }
+  ]
+}

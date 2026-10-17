@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "bench": "node bench/run.js --workers 1,2,4 --jobs 200 --runs 3"
   },
   "keywords": [],
   "author": "",
