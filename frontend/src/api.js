@@ -5,7 +5,7 @@
 
 // The deployed API. Override at build time with VITE_API_URL (for local
 // development: VITE_API_URL=http://localhost:3000).
-export const API_BASE = (import.meta.env?.VITE_API_URL || 'https://api-server-tyjz.onrender.com').replace(/\/+$/, '');
+export const API_BASE = (import.meta.env?.VITE_API_URL || 'https://job-queue-api-838t.onrender.com').replace(/\/+$/, '');
 
 export const MIN_DIMENSION = 1;
 export const MAX_DIMENSION = 4000;
