@@ -2,7 +2,8 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    include: ['test/**/*.test.js'],
+    // Backend tests, plus the frontend's pure helper tests (frontend/src/api.js).
+    include: ['test/**/*.test.js', 'frontend/src/**/*.test.js'],
     environment: 'node',
     // index.js builds its Redis connection options at load time and fails
     // fast without REDIS_HOST. Tests replace bullmq, so nothing connects.

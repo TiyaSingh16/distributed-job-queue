@@ -1,7 +1,30 @@
 import { useState, useEffect } from 'react';
 import './App.css';
+import { requestJson, validateSubmission, TERMINAL_STATUSES, MIN_DIMENSION, MAX_DIMENSION } from './api.js';
 
-const API_BASE = 'https://api-server-tyjz.onrender.com';
+const errorBoxStyle = {
+  background: '#fdecea',
+  border: '1px solid #f5c2c0',
+  color: '#8a1f17',
+  borderRadius: 6,
+  padding: '8px 12px',
+  marginBottom: 12,
+  fontSize: 14,
+};
+
+function ErrorMessage({ message, onRetry }) {
+  if (!message) return null;
+  return (
+    <div role="alert" style={errorBoxStyle}>
+      {message}
+      {onRetry && (
+        <button type="button" onClick={onRetry} style={{ marginLeft: 10 }}>
+          Try again
+        </button>
+      )}
+    </div>
+  );
+}
 
 function SubmitTab({ jobs, setJobs }) {
   const [mode, setMode] = useState('url'); // 'url' | 'file'
@@ -11,59 +34,80 @@ function SubmitTab({ jobs, setJobs }) {
   const [height, setHeight] = useState(300);
   const [submitting, setSubmitting] = useState(false);
 
+  const [submitError, setSubmitError] = useState('');
+  const [pollWarning, setPollWarning] = useState('');
+
   const submitJob = async (e) => {
     e.preventDefault();
+    const problem = validateSubmission({ mode, imageUrl, imageFile, width, height });
+    if (problem) {
+      setSubmitError(problem);
+      return;
+    }
+    setSubmitError('');
     setSubmitting(true);
     try {
-      let res;
+      let data;
       if (mode === 'file') {
-        if (!imageFile) return;
         const formData = new FormData();
         formData.append('image', imageFile);
         formData.append('width', width);
         formData.append('height', height);
-        res = await fetch(`${API_BASE}/jobs/upload`, {
-          method: 'POST',
-          body: formData,
-        });
+        data = await requestJson(
+          '/jobs/upload',
+          { method: 'POST', body: formData },
+          { fallback: 'Could not submit the job. Please try again.' }
+        );
       } else {
-        if (!imageUrl.trim()) return;
-        res = await fetch(`${API_BASE}/jobs`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'resize-image',
-            payload: { imageUrl, width: Number(width), height: Number(height) },
-          }),
-        });
+        data = await requestJson(
+          '/jobs',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'resize-image',
+              payload: { imageUrl: imageUrl.trim(), width: Number(width), height: Number(height) },
+            }),
+          },
+          { fallback: 'Could not submit the job. Please try again.' }
+        );
       }
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Submission failed');
+      if (!data.jobId) throw new Error('Response had no jobId');
       setJobs((prev) => [{ id: data.jobId, status: 'queued' }, ...prev]);
       setImageFile(null);
     } catch (err) {
-      console.error('Failed to submit job:', err);
+      setSubmitError(err.userMessage || 'Could not submit the job. Please try again.');
+      if (!err.userMessage) console.error('Failed to submit job:', err);
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Poll status for all jobs in this session every 2 seconds
+  // Poll every 2 seconds, but only jobs that can still change. If polling
+  // fails (server asleep, network down) the jobs keep their last known status
+  // and a notice explains why nothing is updating; it clears on the next
+  // successful poll.
   useEffect(() => {
+    const pending = jobs.filter((job) => !TERMINAL_STATUSES.includes(job.status));
+    if (pending.length === 0) return undefined;
     const interval = setInterval(async () => {
-      const updated = await Promise.all(
-        jobs.map(async (job) => {
+      let failures = 0;
+      const updates = await Promise.all(
+        pending.map(async (job) => {
           try {
-            const res = await fetch(`${API_BASE}/jobs/${job.id}`);
-            if (!res.ok) return job;
-            const data = await res.json();
+            const data = await requestJson(`/jobs/${encodeURIComponent(job.id)}`);
             return { id: job.id, status: data.status, result: data.result, error: data.error };
           } catch {
-            return job;
+            failures += 1;
+            return null;
           }
         })
       );
-      setJobs(updated);
+      setPollWarning(
+        failures > 0 ? 'Having trouble reaching the server to refresh job status. Retrying automatically...' : ''
+      );
+      const byId = new Map(updates.filter(Boolean).map((u) => [u.id, u]));
+      if (byId.size > 0) setJobs((prev) => prev.map((job) => byId.get(job.id) || job));
     }, 2000);
     return () => clearInterval(interval);
   }, [jobs, setJobs]);
@@ -87,7 +131,8 @@ function SubmitTab({ jobs, setJobs }) {
         </button>
       </div>
 
-      <form onSubmit={submitJob} style={{ marginBottom: 30 }}>
+      <form onSubmit={submitJob} style={{ marginBottom: 30 }} noValidate>
+        <ErrorMessage message={submitError} />
         {mode === 'url' ? (
           <>
             <div style={{ marginBottom: 4 }}>
@@ -95,7 +140,10 @@ function SubmitTab({ jobs, setJobs }) {
               <input
                 type="text"
                 value={imageUrl}
-                onChange={(e) => setImageUrl(e.target.value)}
+                onChange={(e) => {
+                  setImageUrl(e.target.value);
+                  setSubmitError('');
+                }}
                 placeholder="https://example.com/photo.jpg"
                 style={{ width: '100%' }}
               />
@@ -110,15 +158,34 @@ function SubmitTab({ jobs, setJobs }) {
           <div style={{ marginBottom: 10 }}>
             <label>Choose a photo from your device: </label>
             <br />
-            <input type="file" accept="image/*" onChange={(e) => setImageFile(e.target.files[0] || null)} />
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => {
+                setImageFile(e.target.files[0] || null);
+                setSubmitError('');
+              }}
+            />
           </div>
         )}
 
         <div style={{ marginBottom: 10 }}>
           <label>Width (px): </label>
-          <input type="number" value={width} onChange={(e) => setWidth(e.target.value)} min="10" max="2000" />
+          <input
+            type="number"
+            value={width}
+            onChange={(e) => setWidth(e.target.value)}
+            min={MIN_DIMENSION}
+            max={MAX_DIMENSION}
+          />
           <label style={{ marginLeft: 10 }}>Height (px): </label>
-          <input type="number" value={height} onChange={(e) => setHeight(e.target.value)} min="10" max="2000" />
+          <input
+            type="number"
+            value={height}
+            onChange={(e) => setHeight(e.target.value)}
+            min={MIN_DIMENSION}
+            max={MAX_DIMENSION}
+          />
         </div>
 
         <button type="submit" disabled={submitting || (mode === 'url' ? !imageUrl.trim() : !imageFile)}>
@@ -127,6 +194,7 @@ function SubmitTab({ jobs, setJobs }) {
       </form>
 
       <h2>This Session's Jobs</h2>
+      {pollWarning && <p style={{ fontSize: 13, color: '#8a6d00' }}>{pollWarning}</p>}
       {jobs.length === 0 && <p>No jobs submitted yet.</p>}
       <ul style={{ listStyle: 'none', padding: 0 }}>
         {jobs.map((job) => (
@@ -152,32 +220,37 @@ function SubmitTab({ jobs, setJobs }) {
 }
 
 function HistoryTab() {
-  const [jobs, setJobs] = useState([]);
-  const [pagination, setPagination] = useState(null);
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const fetchHistory = async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({ page, limit: 10 });
-      if (status) params.append('status', status);
-      const res = await fetch(`${API_BASE}/jobs?${params}`);
-      const data = await res.json();
-      setJobs(data.jobs || []);
-      setPagination(data.pagination || null);
-    } catch (err) {
-      console.error('Failed to fetch history:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [reloadCount, setReloadCount] = useState(0);
+  // The result of the last finished request, tagged with which request it was
+  // for. "Loading" is derived (latest result is for an older request) rather
+  // than set inside the effect, which avoids cascading renders.
+  const [view, setView] = useState({ key: null, jobs: [], pagination: null, error: '' });
+  const requestKey = `${page}|${status}|${reloadCount}`;
+  const loading = view.key !== requestKey;
 
   useEffect(() => {
-    fetchHistory();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, status]);
+    let cancelled = false;
+    const params = new URLSearchParams({ page, limit: 10 });
+    if (status) params.append('status', status);
+    requestJson(`/jobs?${params}`, {}, { fallback: 'Could not load job history. Please try again.' }).then(
+      (data) => {
+        if (cancelled) return;
+        setView({ key: requestKey, jobs: data.jobs || [], pagination: data.pagination || null, error: '' });
+      },
+      (err) => {
+        if (cancelled) return;
+        // Keep the previously shown page so the list doesn't vanish on a blip.
+        setView((prev) => ({ ...prev, key: requestKey, error: err.userMessage || 'Could not load job history.' }));
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [page, status, requestKey]);
+
+  const { jobs, pagination, error } = view;
 
   return (
     <>
@@ -199,7 +272,8 @@ function HistoryTab() {
       </div>
 
       {loading && <p>Loading...</p>}
-      {!loading && jobs.length === 0 && <p>No jobs found.</p>}
+      {!loading && <ErrorMessage message={error} onRetry={() => setReloadCount((n) => n + 1)} />}
+      {!loading && !error && jobs.length === 0 && <p>No jobs found.</p>}
 
       <ul style={{ listStyle: 'none', padding: 0 }}>
         {jobs.map((job) => (
