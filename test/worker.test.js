@@ -167,8 +167,28 @@ describe('processJob: permanent errors are unrecoverable, transient ones are ret
     fakes.uploadResult = { error: new Error('Cloudinary 500'), result: null };
 
     const rejection = worker.processJob(bullJob());
-    await expect(rejection).rejects.toThrow('Cloudinary 500');
+    // Retried (not unrecoverable), but the stored message is the generic one:
+    // a raw library error is not something to show the user.
+    await expect(rejection).rejects.toThrow(worker.GENERIC_FAILURE);
     await expect(rejection).rejects.not.toBeInstanceOf(UnrecoverableError);
+  });
+
+  it('never exposes an unexpected error message, but logs it', async () => {
+    fakes.axiosGet.mockResolvedValue(imageResponse());
+    fakes.sharpToBuffer.mockResolvedValue(Buffer.from('small'));
+    fakes.uploadResult = { error: new Error('connect ECONNREFUSED 10.0.3.7:443 (internal)'), result: null };
+
+    const err = await worker.processJob(bullJob()).catch((e) => e);
+    expect(err.message).toBe(worker.GENERIC_FAILURE);
+    expect(err.message).not.toMatch(/10\.0\.3\.7|ECONNREFUSED/);
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('unexpected error'), expect.any(Error));
+  });
+
+  it('keeps the specific message for a retryable download failure', async () => {
+    fakes.axiosGet.mockRejectedValue(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }));
+    const err = await worker.processJob(bullJob()).catch((e) => e);
+    expect(err).toBeInstanceOf(worker.UserFacingError);
+    expect(err.message).toMatch(/Could not download the image \(ECONNRESET\)/);
   });
 });
 
@@ -185,7 +205,9 @@ describe('processJob: input safety', () => {
   it('refuses an internal address without downloading it', async () => {
     const rejection = worker.processJob(bullJob({ imageUrl: 'http://169.254.169.254/latest/meta-data/' }));
     await expect(rejection).rejects.toBeInstanceOf(UnrecoverableError);
-    await expect(rejection).rejects.toThrow(/Refusing to download/);
+    await expect(rejection).rejects.toThrow(/private or internal network address/);
+    // The resolved/internal address must not be echoed back to the user.
+    await expect(rejection).rejects.not.toThrow(/169\.254/);
     expect(fakes.axiosGet).not.toHaveBeenCalled();
   });
 

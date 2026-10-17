@@ -12,6 +12,17 @@ function isLegacyId(id) {
   return `${parseInt(id, 10)}` === id;
 }
 
+// BullMQ's own failure reasons (e.g. "job stalled more than allowable limit"
+// when a worker died mid-job) are written for operators, not users. Messages
+// from the worker are already user-safe (see worker.js), so pass them through.
+const INTERRUPTED =
+  'Processing was interrupted (a worker restarted) and could not be completed. Please submit the image again.';
+
+function publicFailureReason(reason) {
+  if (!reason || /stalled/i.test(reason)) return INTERRUPTED;
+  return reason;
+}
+
 // Write a final state, but only if the record is still in flight, so we never
 // overwrite a terminal state the worker recorded after we read the record.
 function finalize(Job, bullJobId, update) {
@@ -30,7 +41,7 @@ async function reconcile(Job, queue, record) {
       if (bullJob.returnvalue && bullJob.returnvalue.imageUrl) update.result = bullJob.returnvalue;
       await finalize(Job, record.bullJobId, update);
     } else if (state === 'failed') {
-      await finalize(Job, record.bullJobId, { status: 'failed', error: bullJob.failedReason });
+      await finalize(Job, record.bullJobId, { status: 'failed', error: publicFailureReason(bullJob.failedReason) });
     }
     // Any other state (waiting, active, delayed, ...) means BullMQ still owns
     // the job and will deliver it; nothing to do.
@@ -70,4 +81,4 @@ function startSweeper(Job, queue) {
   }, SWEEP_INTERVAL_MS);
 }
 
-module.exports = { sweepOnce, startSweeper, STALE_AFTER_MS };
+module.exports = { sweepOnce, startSweeper, publicFailureReason, STALE_AFTER_MS };

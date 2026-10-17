@@ -27,9 +27,40 @@ function isPermanentHttpError(status) {
   return status >= 400 && status < 500 && !RETRYABLE_4XX.includes(status);
 }
 
+// The error message of a failed job is stored in Mongo and shown to the user
+// in the UI, so it must be written for a person and must not leak internals
+// (hostnames, internal IPs, library errors). Errors we throw on purpose are
+// either UnrecoverableError (permanent) or UserFacingError (retryable); both
+// carry a message meant for the user. Anything else is unexpected: it is
+// logged in full and replaced with GENERIC_FAILURE before BullMQ stores it.
+class UserFacingError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'UserFacingError';
+  }
+}
+
+const GENERIC_FAILURE =
+  'Processing failed because of a temporary server problem. Please try submitting the image again.';
+
+function isUserFacing(err) {
+  return err instanceof UnrecoverableError || err?.name === 'UnrecoverableError' || err instanceof UserFacingError;
+}
+
 // Throws UnrecoverableError for failures no retry can fix, so BullMQ fails the
 // job immediately. Any other error is retried per the queue's job options.
 async function processJob(job) {
+  try {
+    return await runJob(job);
+  } catch (err) {
+    if (isUserFacing(err)) throw err;
+    console.error(`Job ${job.id} hit an unexpected error:`, err);
+    // A plain Error, so BullMQ still retries it.
+    throw new Error(GENERIC_FAILURE);
+  }
+}
+
+async function runJob(job) {
   console.log(`Processing job ${job.id}:`, job.data);
   // Same rules as the API. Also catches records created before validation.
   const parsed = resizePayload.safeParse(job.data);
@@ -46,14 +77,19 @@ async function processJob(job) {
     response = await fetchImage(imageUrl);
   } catch (err) {
     if (isRejectedUrl(err)) {
-      throw new UnrecoverableError(`Refusing to download the image: ${err.cause?.message || err.message}`);
+      // Log which address was refused, but don't echo it back: telling a
+      // user what an internal hostname resolves to is itself a leak.
+      console.warn(`Job ${job.id}: refused URL ${imageUrl}: ${err.cause?.message || err.message}`);
+      throw new UnrecoverableError(
+        'This URL points to a private or internal network address, which is not allowed. Use a publicly accessible image URL.'
+      );
     }
     if (/maxContentLength/.test(err.message)) {
       throw new UnrecoverableError('The image is larger than the 15MB download limit.');
     }
     const status = err.response?.status;
     const message = `Could not download the image (${status || err.code || 'network error'}). Check that the URL is publicly accessible.`;
-    throw isPermanentHttpError(status) ? new UnrecoverableError(message) : new Error(message);
+    throw isPermanentHttpError(status) ? new UnrecoverableError(message) : new UserFacingError(message);
   }
 
   // 2. Confirm we actually got an image back, not an HTML error/redirect page
@@ -74,7 +110,8 @@ async function processJob(job) {
       .jpeg({ quality: 80 })
       .toBuffer();
   } catch (err) {
-    throw new UnrecoverableError(`Could not process the image — it may be corrupted or an unsupported format (${err.message}).`);
+    console.warn(`Job ${job.id}: sharp could not decode the image: ${err.message}`);
+    throw new UnrecoverableError('Could not process the image. It may be corrupted, too large, or in an unsupported format.');
   }
 
   // 4. Upload the resized buffer to Cloudinary. A fixed public_id means a
@@ -168,4 +205,12 @@ if (require.main === module) {
   });
 }
 
-module.exports = { processJob, handleFailed, isFinalAttempt, registerShutdown, MAX_INPUT_PIXELS };
+module.exports = {
+  processJob,
+  handleFailed,
+  isFinalAttempt,
+  registerShutdown,
+  UserFacingError,
+  GENERIC_FAILURE,
+  MAX_INPUT_PIXELS,
+};

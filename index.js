@@ -156,9 +156,45 @@ app.get('/jobs', async (req, res) => {
 
 // Status check for a single job
 app.get('/jobs/:bullJobId', async (req, res) => {
-  const job = await Job.findOne({ bullJobId: req.params.bullJobId });
-  if (!job) return res.status(404).json({ message: 'Job not found' });
-  res.json(job);
+  try {
+    const job = await Job.findOne({ bullJobId: req.params.bullJobId });
+    if (!job) return res.status(404).json({ message: 'Job not found' });
+    res.json(job);
+  } catch (err) {
+    console.error('Error fetching job:', err);
+    res.status(500).json({ message: 'Failed to fetch job status' });
+  }
+});
+
+// Liveness check for the hosting platform and for verifying a deploy.
+// Deliberately does not touch Mongo or Redis: it answers "is this process up
+// and serving HTTP", not "are all dependencies healthy".
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
+// Anything that reaches here matched no route.
+app.use((req, res) => {
+  res.status(404).json({ message: 'Not found' });
+});
+
+// Last-resort error handler. Without it, Express's default handler answers
+// with an HTML page that includes the stack trace whenever NODE_ENV is not
+// 'production'. Every error response from this API is JSON with a `message`
+// written for the user; details only go to the server log.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({ message: 'Request body must be valid JSON.' });
+  }
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ message: 'The image is larger than the 10 MB upload limit.' });
+    }
+    return res.status(400).json({ message: 'The upload could not be read. Send one image in the "image" field.' });
+  }
+  console.error('Unhandled error:', err);
+  res.status(500).json({ message: 'Something went wrong on the server. Please try again.' });
 });
 
 // Only start listening when run directly (`node index.js`), so tests can

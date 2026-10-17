@@ -87,6 +87,19 @@ describe('sweeper reconciler', () => {
     expect(queue.added).toHaveLength(0);
   });
 
+  it("replaces BullMQ's internal stalled-job reason with a user-readable message", async () => {
+    const Job = createFakeJobModel([record({ bullJobId: OID, status: 'processing' })]);
+    const queue = createFakeQueue({
+      [OID]: { state: 'failed', failedReason: 'job stalled more than allowable limit' },
+    });
+
+    await sweepOnce(Job, queue, NOW);
+
+    expect(Job.docs[0].status).toBe('failed');
+    expect(Job.docs[0].error).toMatch(/interrupted/);
+    expect(Job.docs[0].error).not.toMatch(/stalled/);
+  });
+
   it('marks a missing legacy numeric-id record failed instead of re-adding it', async () => {
     const Job = createFakeJobModel([record({ bullJobId: '42', status: 'processing' })]);
     const queue = createFakeQueue();
